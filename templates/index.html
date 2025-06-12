@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>품질 분석 시스템 - Quality Analysis System</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <!-- Left Panel -->
+        <div class="left-panel">
+            <!-- Metrics Panel -->
+            <div class="metrics-panel">
+                <h2 class="panel-title">지표 목록</h2>
+                <ul class="metrics-list">
+                    <li class="metric-item">
+                        <button class="metric-button">판매</button>
+                        <div class="dropdown-content">
+                            <div class="sub-metric">매출 현황</div>
+                            <div class="sub-metric">고객별 매출</div>
+                            <div class="sub-metric">품종별 매출</div>
+                        </div>
+                    </li>
+                    <li class="metric-item">
+                        <button class="metric-button">원가</button>
+                        <div class="dropdown-content">
+                            <div class="sub-metric">원가 분석</div>
+                            <div class="sub-metric">공정별 원가</div>
+                        </div>
+                    </li>
+                    <li class="metric-item">
+                        <button class="metric-button">제철소</button>
+                        <div class="dropdown-content">
+                            <div class="sub-metric available">품질부적합</div>
+                            <div class="sub-metric">생산량</div>
+                            <div class="sub-metric">실수율</div>
+                        </div>
+                    </li>
+                </ul>
+            </div>
+
+            <!-- Chat History Panel -->
+            <div class="chat-history-panel">
+                <h2 class="panel-title">채팅방 목록</h2>
+                <ul class="chat-sessions">
+                    <!-- Sessions will be loaded dynamically -->
+                </ul>
+            </div>
+        </div>
+
+        <!-- Center Panel - Charts -->
+        <div class="center-panel">
+            <div id="charts-container" class="charts-container">
+                <!-- Charts will be added dynamically -->
+            </div>
+        </div>
+
+        <!-- Right Panel - Chat -->
+        <div class="right-panel">
+            <div class="chat-header">
+                <h2 class="chat-title">LLM 분석</h2>
+                <button id="reset-btn" class="reset-btn">Reset</button>
+            </div>
+            
+            <div id="chat-messages" class="chat-messages">
+                <!-- Messages will be added dynamically -->
+            </div>
+            
+            <div class="chat-input-container">
+                <form id="chat-form" class="chat-input-form">
+                    <textarea 
+                        id="chat-input" 
+                        class="chat-input" 
+                        placeholder="품질이나 클레임에 대해 궁금한 것을 물어보세요..."
+                        rows="1"
+                    ></textarea>
+                    <button id="send-btn" type="submit" class="send-btn">전송</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
