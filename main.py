@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
+from contextlib import asynccontextmanager
 import sqlite3
 import pandas as pd
 import json
@@ -14,12 +15,6 @@ from database import DatabaseService
 from llm_service import LLMService
 from models import *
 
-app = FastAPI(title="Quality Analysis System", version="1.0.0")
-
-# Mount static files and templates
-app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
-
 # Initialize services
 db_service = DatabaseService()
 llm_service = LLMService()
@@ -27,9 +22,9 @@ llm_service = LLMService()
 # Session storage (in production, use Redis or similar)
 sessions: Dict[str, ChatSession] = {}
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database and load CSV data"""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan manager"""
     try:
         # Initialize database
         db_service.init_database()
@@ -45,6 +40,16 @@ async def startup_event():
     except Exception as e:
         print(f"Error during startup: {e}")
         raise
+    
+    yield
+    
+    # Cleanup code would go here if needed
+
+app = FastAPI(title="Quality Analysis System", version="1.0.0", lifespan=lifespan)
+
+# Mount static files and templates
+app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
@@ -307,4 +312,4 @@ async def get_session(session_id: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=5000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=5000, reload=True)
