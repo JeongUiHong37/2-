@@ -1,0 +1,134 @@
+# LLM 대화 흐름 설계 문서 for Cursor AI / Replit 지시
+
+"""
+📌 목적: 아래 내용은 FastAPI 기반 백엔드에서 LLM과 사용자 간 멀티턴 대화 흐름을 구현하기 위한 사양입니다.
+Cursor AI나 Replit 등에서 개발자에게 전달할 수 있도록 명확한 작업 지시 형태로 구성되었습니다.
+"""
+
+# ==========================================
+# [1] 전체 대화 흐름 개요
+# ==========================================
+
+# 사용자 입력 → LLM 분류 → 반문 → SQL 생성 → SQL 실행 → 시각화/요약
+
+# 단계:
+# 0단계. queryType 분류 (concept_lookup vs analytical)
+# 1단계. needsConfirmation 판단 및 반문 생성
+# 2단계. confirmedIntent 확보 후 SQL 생성
+# 3단계. SQL 다중 여부 판단 및 생성
+# 4단계. SQL 실행 및 후처리
+# 5단계. LLM이 차트 config + 요약 생성
+# 6단계. 시각화, SQL, 요약 결과를 각 패널에 전송
+# 7단계. 전체 대화 흐름 chatHistory[] 에 누적 저장하여 멀티턴 지원
+
+
+# ==========================================
+# [2] LLM input/output 형식 명세
+# ==========================================
+
+# --- 0단계: Query 분류 ---
+# Input: 사용자 natural language 질문
+# Output 예시:
+{
+  "queryType": "concept_lookup",  # 또는 analytical
+  "reason": "'UST 불량'의 개념을 설명해달라는 요청입니다."
+}
+
+{
+  "queryType": "analytical",
+  "reason": "불량률에 대한 데이터를 추출해달라는 요청입니다."
+}
+
+
+# --- 1단계: 반문 생성 (needsConfirmation) ---
+# ✅ 사용자 질문이 이미 분석 축을 명시한 경우에는 해당 축 내부의 해석만 확인해야 함
+# 예: "공정별로 보여줘" → "공정에는 발생공정/책임공정이 있습니다. 어떤 걸 기준으로 볼까요?"
+# ❌ 사용자가 이미 축을 지정했는데 새로운 축을 제안해서는 안 됨
+
+# Output 예시 (1): 축 없음 (기준 선택 유도)
+{
+  "needsConfirmation": true,
+  "confirmationQuestion": "불량률을 공정별로 볼까요, 품종별로 볼까요?",
+  "candidateIntents": ["공정별 불량률", "품종별 불량률"]
+}
+
+# Output 예시 (2): 축 있음 → 내부 속성 확인
+{
+  "needsConfirmation": true,
+  "confirmationQuestion": "공정에는 발생공정과 책임공정이 있는데, 어떤 걸 기준으로 분석할까요?",
+  "candidateIntents": ["발생공정 기준", "책임공정 기준"]
+}
+
+# Output 예시 (3): 축 있음 → 단순 확인
+{
+  "needsConfirmation": true,
+  "confirmationQuestion": "공정 기준으로 이렇게 분석해도 괜찮을까요?",
+  "candidateIntents": ["공정 기준 분석"]
+}
+
+
+# --- 2단계: intent 확정 후 SQL 생성 판단 ---
+# Output 예시:
+{
+  "confirmedIntent": "공정별 불량률 분석 (최근 3개월)",
+  "sqlQueries": [
+    {
+      "description": "불량량 집계",
+      "query": "SELECT ..."
+    },
+    {
+      "description": "생산량 집계",
+      "query": "SELECT ..."
+    }
+  ],
+  "requiresPostprocessing": true,
+  "postprocessingNote": "불량량/생산량 조인 후 비율 계산 필요"
+}
+
+
+# --- 3단계: 시각화 구성 + 요약 ---
+# LLM에 DataFrame 요약 요청 후 받는 응답
+{
+  "summary": "공정별 불량률이 전반적으로 감소하였고, 압연공정의 개선이 뚜렷합니다.",
+  "chartType": "line",
+  "xAxis": "날짜",
+  "yAxis": "불량률",
+  "seriesBy": "공정명"
+}
+
+
+# ==========================================
+# [3] 각 결과 패널에 전달
+# ==========================================
+
+# 중앙 패널: Plotly로 시각화
+# SQL 버튼: 해당 분석에 사용된 SQL 리스트 텍스트 표시
+# 우측 패널: summary 멘트 채팅 형식으로 추가
+
+# 상태 저장 방식 (예시):
+chatHistory[]
+
+# chatHistory[]는 멀티턴 흐름 유지를 위해 다음과 같이 구성됨:
+# 예시:
+chatHistory = [
+  {"role": "user", "content": "공정별로 품질부적합률 보여줘"},
+  {"role": "assistant", "content": "공정에는 발생공정과 책임공정이 있는데, 어떤 걸 기준으로 볼까요?"},
+  {"role": "user", "content": "발생공정 기준으로 해줘"},
+  {"role": "assistant", "content": "분석 결과입니다: ..."}
+]
+
+
+# ==========================================
+# [4] 지시 방법 요약
+# ==========================================
+
+# 개발자에게 지시 시:
+# - 위 구조를 기반으로 FastAPI에서 상태관리 + 멀티턴 흐름 구현
+# - LLMService 클래스에서 각 단계별 프롬프트와 파싱 구조 구분
+# - 프론트엔드에서는 각 결과를 분리 패널에 비동기 전송
+# - needsConfirmation 상태에서는 사용자 응답을 받을 때까지 멈춤
+# - 모든 입력과 응답은 chatHistory[]에 누적 저장되어야 함 (세션 유지 필수)
+
+# 참고: concept_lookup인 경우에는 도메인 JSON에서 string 기반 응답 처리 (LLM 호출 없음)
+
+# 끝.
