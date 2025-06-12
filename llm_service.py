@@ -91,32 +91,11 @@ DOMAIN_KNOWLEDGE = """
 LLM은 사용자에게 명확하고 의사결정 가능한 형태의 정보로 분석 결과를 제공해야 합니다.
 """
 
-# Dictionary for concept definitions
-CONCEPT_DEFINITIONS = {
-    'ust불량': 'UST불량: 초음파검사 불량. 내부 결함을 검출하는 초음파 검사에서 기준을 만족하지 못하는 경우입니다.',
-    'build up': 'Build Up: 롤에 이물질이 붙어서 발생하는 표면결함. 압연 과정에서 롤 표면에 금속이나 이물질이 부착되어 제품 표면에 요철을 만드는 현상입니다.',
-    'dust': 'Dust: 먼지나 이물질로 인한 표면오염. 제조 과정에서 먼지가 제품 표면에 부착되어 품질을 저하시키는 결함입니다.',
-    '품질부적합률': '품질부적합률 = (품질부적합발생량 / 제품생산량) × 100. 전체 생산량 대비 품질 기준에 미달하는 제품의 비율을 나타내는 핵심 품질 지표입니다.',
-    '클레임률': '클레임률 = (클레임 보상금액 / 매출액) × 100. 매출 대비 고객 클레임으로 인한 보상금액의 비율을 나타냅니다.',
-    '발생공정': '발생공정(QLY_INC_HPN_FAC_TP_NM): 품질부적합이 실제로 발생한 공정을 의미합니다.',
-    '책임공정': '책임공정(QLY_INC_RESP_FAC_TP_NM): 품질부적합에 대한 책임이 있는 공정을 의미합니다.',
-    '냉연': '냉연: 냉간압연강판. 상온에서 압연하여 만든 얇은 강판으로 표면이 매끄럽고 치수 정밀도가 높습니다.',
-    '열연': '열연: 열간압연강판. 고온에서 압연하여 만든 강판으로 두께가 두껍고 구조용으로 많이 사용됩니다.',
-    '후판': '후판: 두꺼운 강판. 일반적으로 6mm 이상의 두꺼운 강판으로 조선, 건설, 중공업 등에 사용됩니다.',
-    '전기강판': '전기강판: 전기기기용 강판. 변압기, 모터 등 전기기기의 철심으로 사용되는 특수강판입니다.',
-    '선재': '선재: 철사 원료용 강재. 철사, 볼트, 너트 등을 만들기 위한 원료로 사용되는 봉강입니다.',
-    '도금': '도금: 아연도금강판. 강판 표면에 아연을 도금하여 내식성을 향상시킨 제품입니다.',
-    'edge burr': 'Edge burr: 가장자리 버. 절단이나 압연 과정에서 가장자리에 생기는 날카로운 돌기로 안전사고의 원인이 될 수 있습니다.',
-    'black line': 'Black Line: 검은 선 형태의 표면결함. 압연 과정에서 롤이나 이물질에 의해 제품 표면에 생기는 검은 선 모양의 결함입니다.',
-    'crack': 'Crack: 균열. 제품에 발생하는 갈라짐으로 구조적 강도를 저하시키는 심각한 결함입니다.',
-    '두께불량': '두께불량: 규격 두께 미달. 고객이 요구하는 두께 규격을 만족하지 못하는 경우입니다.',
-    '폭불량': '폭불량: 규격 폭 미달. 고객이 요구하는 폭 규격을 만족하지 못하는 경우입니다.',
-    '양파': '양파: 표면 박리 현상. 강판 표면이 양파껍질처럼 벗겨지는 결함으로 표면 품질을 저하시킵니다.'
-}
+# 모든 개념 정의는 LLM이 DOMAIN_KNOWLEDGE를 기반으로 동적 생성
 
 class LLMService:
     def __init__(self, db_service=None):
-        self.model = "gpt-4"
+        self.model = "gpt-4o"
         self.db_service = db_service
         self.domain_knowledge = DOMAIN_KNOWLEDGE
 
@@ -125,62 +104,64 @@ class LLMService:
             raise ValueError("OPENAI_API_KEY environment variable is required")
         self.client = OpenAI(api_key=api_key)
 
-    def _get_concept_definition(self, query: str) -> Optional[str]:
-        """Extract concept definitions based on query"""
-        query_lower = query.lower()
-        
-        # Find matching concepts
-        for key, definition in CONCEPT_DEFINITIONS.items():
-            if key in query_lower:
-                return definition
-        
-        # If no direct match, return general information
-        if '품질' in query_lower or '부적합' in query_lower:
-            return """품질부적합이란 제품이 규정된 품질 기준을 만족하지 못하는 상태를 말합니다. 
-주요 측정 지표로는 품질부적합률(불량률)이 있으며, 이는 (품질부적합발생량 / 제품생산량) × 100으로 계산됩니다.
-목표 기준은 5% 이하입니다."""
-        
-        elif '클레임' in query_lower:
-            return """클레임은 고객이 제품 품질에 대해 제기하는 불만이나 보상 요구를 의미합니다.
-클레임률은 (클레임 보상금액 / 매출액) × 100으로 계산되며, 목표 기준은 1% 이하입니다."""
-        
-        return None
+# _get_concept_definition 메서드 제거 - 모든 개념 정의는 LLM이 처리
 
-    async def _call_openai(self, messages: List[Dict], temperature: float = 0.1, return_json: bool = True) -> Union[Dict[str, Any], str]:
+    async def _call_openai(self, messages: List[Dict], temperature: float = 0.1, return_json: bool = True, retry_count: int = 2) -> Union[Dict[str, Any], str]:
         """OpenAI API 호출 및 응답 처리를 위한 헬퍼 메서드"""
-        try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=temperature
-            )
-            
-            content = response.choices[0].message.content
-            if not content or not content.strip():
-                return {"type": "error", "message": "Empty response from LLM"} if return_json else "응답을 생성할 수 없습니다."
-            
-            if return_json:
-                try:
-                    if content.strip().startswith("{"):
-                        result = json.loads(content)
-                        # Convert string "true"/"false" to boolean for needsConfirmation
-                        if "needsConfirmation" in result:
-                            if isinstance(result["needsConfirmation"], str):
-                                if result["needsConfirmation"].lower() in ["true", "1", "yes"]:
-                                    result["needsConfirmation"] = True
-                                else:
-                                    result["needsConfirmation"] = False
-                            elif not isinstance(result["needsConfirmation"], bool):
-                                result["needsConfirmation"] = False
-                        return result
-                    return {"type": "error", "message": "Response is not in JSON format"}
-                except json.JSONDecodeError as e:
-                    return {"type": "error", "message": f"JSON parsing error: {str(e)}"}
-            else:
-                return content.strip()
+        for attempt in range(retry_count):
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    temperature=temperature
+                )
                 
-        except Exception as e:
-            return {"type": "error", "message": f"API call error: {str(e)}"} if return_json else f"오류가 발생했습니다: {str(e)}"
+                content = response.choices[0].message.content
+                if not content or not content.strip():
+                    if attempt < retry_count - 1:
+                        # 재시도 시 더 높은 temperature로 다양한 응답 유도
+                        temperature = min(0.7, temperature + 0.3)
+                        continue
+                    # 최종 실패 시에도 LLM이 처리할 수 있는 구조 반환
+                    return {"type": "error", "message": "LLM 응답 생성 실패", "retry_attempted": True} if return_json else "응답을 생성할 수 없습니다."
+                
+                if return_json:
+                    try:
+                        if content.strip().startswith("{"):
+                            result = json.loads(content)
+                            # Convert string "true"/"false" to boolean for needsConfirmation
+                            if "needsConfirmation" in result:
+                                if isinstance(result["needsConfirmation"], str):
+                                    if result["needsConfirmation"].lower() in ["true", "1", "yes"]:
+                                        result["needsConfirmation"] = True
+                                    else:
+                                        result["needsConfirmation"] = False
+                                elif not isinstance(result["needsConfirmation"], bool):
+                                    result["needsConfirmation"] = False
+                            return result
+                        
+                        # JSON 형식이 아닌 경우 재시도
+                        if attempt < retry_count - 1:
+                            # JSON 형식 요구를 강조하는 메시지 추가
+                            messages.append({"role": "user", "content": "JSON 형식으로만 응답해주세요."})
+                            continue
+                        return {"type": "error", "message": "JSON 형식 응답 생성 실패", "raw_response": content}
+                        
+                    except json.JSONDecodeError as e:
+                        if attempt < retry_count - 1:
+                            # JSON 파싱 오류 시 재시도
+                            messages.append({"role": "user", "content": "올바른 JSON 형식으로 다시 응답해주세요."})
+                            continue
+                        return {"type": "error", "message": f"JSON 파싱 오류: {str(e)}", "raw_response": content}
+                else:
+                    return content.strip()
+                    
+            except Exception as e:
+                if attempt < retry_count - 1:
+                    # API 오류 시 재시도
+                    continue
+                # 최종 실패 시에도 구조화된 응답 반환
+                return {"type": "error", "message": f"API 호출 오류: {str(e)}", "retry_attempted": True} if return_json else f"시스템 오류가 발생했습니다: {str(e)}"
 
     async def process_query(self, query: str, chat_history: List[Dict]) -> Dict[str, Any]:
         """전체 5단계 프로세스를 처리하는 메인 메서드"""
@@ -290,13 +271,7 @@ class LLMService:
         
         response = await self._call_openai(messages, temperature=0.3, return_json=False)
         
-        # GPT 응답 실패 시 fallback으로 기존 정의 사용
-        if "오류가 발생했습니다" in response or "응답을 생성할 수 없습니다" in response:
-            fallback = self._get_concept_definition(query)
-            if fallback:
-                return fallback
-            return "죄송합니다. 해당 용어나 개념에 대한 설명을 생성할 수 없습니다."
-        
+        # LLM이 모든 상황을 처리하도록 함 - fallback 제거
         return response
 
     async def _classify_query(self, query: str) -> Dict[str, Any]:
@@ -318,8 +293,7 @@ JSON 형식으로 응답해주세요:
         ]
         
         result = await self._call_openai(messages, return_json=True)
-        if "type" in result and result["type"] == "error":
-            return {"queryType": "analytical", "reason": "분류 오류로 인한 기본값"}
+        # LLM이 에러 상황도 처리하도록 함 - 하드코딩된 fallback 제거
         return result
 
     async def _check_confirmation_needed(self, query: str, chat_history: List[Dict]) -> Dict[str, Any]:
@@ -369,8 +343,7 @@ JSON 형식으로 응답해주세요:
         ]
         
         result = await self._call_openai(messages, return_json=True)
-        if "type" in result and result["type"] == "error":
-            return {"needsConfirmation": False}
+        # LLM이 에러 상황도 처리하도록 함 - 하드코딩된 fallback 제거
         return result
 
     async def _generate_sql(self, query: str, chat_history: List[Dict], confirmation: Dict[str, Any]) -> Dict[str, Any]:
@@ -398,8 +371,6 @@ SQL 생성 규칙:
 - SQLite 문법 사용
 - 날짜는 'YYYYMMDD' 문자열 형식
 - 불량률 = (QLY_INC_HPW / TR_F_PRODQUANTITY) * 100
-- 적절한 GROUP BY, ORDER BY 사용
-- 최근 데이터 우선 (ORDER BY DAY_CD DESC)
 
 JSON 형식으로 응답해주세요:
 {{
@@ -418,25 +389,7 @@ JSON 형식으로 응답해주세요:
         ]
         
         result = await self._call_openai(messages)
-        if "type" in result and result["type"] == "error":
-            return {
-                "confirmedIntent": "오류",
-                "sqlQueries": [{
-                    "description": "기본 쿼리",
-                    "query": """
-                    SELECT DAY_CD, 
-                           SUM(TR_F_PRODQUANTITY) as 총생산량,
-                           SUM(QLY_INC_HPW) as 부적합발생량,
-                           ROUND(CAST(SUM(QLY_INC_HPW) AS FLOAT) / NULLIF(SUM(TR_F_PRODQUANTITY), 0) * 100, 2) as 불량률
-                    FROM TB_SUM_MQS_QMHT200
-                    GROUP BY DAY_CD
-                    ORDER BY DAY_CD DESC
-                    LIMIT 10;
-                    """,
-                    "purpose": "기본 품질 현황 조회"
-                }],
-                "requiresPostprocessing": False
-            }
+        # LLM이 에러 상황에서도 적절한 SQL을 생성하도록 함 - 하드코딩된 기본 SQL 제거
         return result
 
     async def _generate_visualization_config(self, sql_results: List[Dict], query: str, chat_history: List[Dict]) -> Dict[str, Any]:
@@ -466,12 +419,5 @@ SQL 실행 결과:
         ]
         
         result = await self._call_openai(messages)
-        if "type" in result and result["type"] == "error":
-            return {
-                "chartType": "line",
-                "xAxis": "DAY_CD",
-                "yAxis": "불량률",
-                "summary": "시각화 설정 생성 중 오류가 발생했습니다.",
-                "insights": ["데이터 확인이 필요합니다."]
-            }
+        # LLM이 에러 상황에서도 적절한 시각화 설정을 생성하도록 함 - 하드코딩된 fallback 제거
         return result
