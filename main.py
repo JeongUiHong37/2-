@@ -204,6 +204,80 @@ async def get_session(session_id: str):
         print(f"Error in get_session: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/yearly_quality_data")
+async def get_yearly_quality_data(request: dict):
+    """연도별 품질부적합률 데이터 제공"""
+    try:
+        # 품질부적합 데이터 조회
+        query = """
+        SELECT 
+            SUBSTR(DAY_CD, 1, 4) as year,
+            SUM(QLY_INC_HPW) as total_defects,
+            SUM(TR_F_PRODQUANTITY) as total_production
+        FROM TB_SUM_MQS_QMHT200 
+        WHERE DAY_CD IS NOT NULL 
+        GROUP BY SUBSTR(DAY_CD, 1, 4)
+        ORDER BY year
+        """
+        
+        df = db_service.execute_query(query)
+        
+        if df.empty:
+            return {"years": [], "quality_rates": []}
+        
+        # 품질부적합률 계산 (품질부적합발생량 / 제품생산량 * 100)
+        df['quality_rate'] = (df['total_defects'] / df['total_production'] * 100).round(2)
+        
+        return {
+            "years": df['year'].tolist(),
+            "quality_rates": df['quality_rate'].tolist()
+        }
+        
+    except Exception as e:
+        print(f"Error in get_yearly_quality_data: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/monthly_quality_trend")
+async def get_monthly_quality_trend(request: dict):
+    """2025년 1월~3월 품질부적합률 추세 데이터 제공"""
+    try:
+        # 2025년 1월~3월 월별 품질부적합률 데이터 조회
+        query = """
+        SELECT 
+            SUBSTR(DAY_CD, 1, 6) as year_month,
+            SUM(QLY_INC_HPW) as total_defects,
+            SUM(TR_F_PRODQUANTITY) as total_production
+        FROM TB_SUM_MQS_QMHT200 
+        WHERE DAY_CD LIKE '2025%' 
+        AND SUBSTR(DAY_CD, 5, 2) IN ('01', '02', '03')
+        AND DAY_CD IS NOT NULL 
+        GROUP BY SUBSTR(DAY_CD, 1, 6)
+        ORDER BY year_month
+        """
+        
+        df = db_service.execute_query(query)
+        
+        if df.empty:
+            return {"months": [], "quality_rates": []}
+        
+        # 품질부적합률 계산 (품질부적합발생량 / 제품생산량 * 100)
+        df['quality_rate'] = (df['total_defects'] / df['total_production'] * 100).round(2)
+        
+        # 월 이름으로 변환 (202501 -> 1월)
+        month_names = []
+        for year_month in df['year_month']:
+            month = int(year_month[4:6])
+            month_names.append(f"{month}월")
+        
+        return {
+            "months": month_names,
+            "quality_rates": df['quality_rate'].tolist()
+        }
+        
+    except Exception as e:
+        print(f"Error in get_monthly_quality_trend: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True, log_level="debug")

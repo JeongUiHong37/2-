@@ -287,6 +287,10 @@ class QualityAnalysisApp {
 
         const data = sql_results[0].data;
         const viz = visualization;
+        
+        // LLM 추천 설정을 로그로 확인
+        console.log('[DEBUG] LLM 추천 시각화 설정:', viz);
+        console.log('[DEBUG] 데이터 샘플:', data.slice(0, 3));
 
         try {
             let plotlyData = [];
@@ -296,70 +300,74 @@ class QualityAnalysisApp {
                 plot_bgcolor: 'rgba(0,0,0,0)',
                 font: { color: '#f8fafc' },
                 xaxis: { 
-                    title: viz.xAxis,
+                    title: viz.xAxis || 'X축',
                     gridcolor: '#475569',
                     color: '#f8fafc'
                 },
                 yaxis: { 
-                    title: viz.yAxis,
+                    title: viz.yAxis || 'Y축',
                     gridcolor: '#475569',
                     color: '#f8fafc'
                 },
                 margin: { t: 50, r: 50, b: 50, l: 50 }
             };
 
-            // 개선: seriesBy가 있을 때 xAxis별로 seriesBy별 시리즈를 그룹화
-            if ((viz.chartType === 'bar' || viz.chartType === 'line') && viz.seriesBy && viz.seriesBy !== 'null') {
-                // x축 값(예: 제품)과 seriesBy 값(예: YEAR) 추출
-                const xValues = [...new Set(data.map(d => d[viz.xAxis]))];
-                const seriesGroups = [...new Set(data.map(d => d[viz.seriesBy]))];
-                plotlyData = seriesGroups.map(group => {
-                    return {
-                        x: xValues,
-                        y: xValues.map(x => {
-                            const found = data.find(d => d[viz.xAxis] == x && d[viz.seriesBy] == group);
-                            return found ? found[viz.yAxis] : 0;
-                        }),
-                        name: group,
-                        type: viz.chartType === 'bar' ? 'bar' : 'scatter',
-                        mode: viz.chartType === 'line' ? 'lines+markers' : undefined,
-                        marker: { /* 색상 지정 가능 */ }
-                    };
-                });
-            } else if (viz.chartType === 'bar' || viz.chartType === 'line') {
-                // 기존 단일 시리즈
-                const xData = data.map(d => d[viz.xAxis]);
-                const yData = data.map(d => d[viz.yAxis]);
-                plotlyData = [{
-                    x: xData,
-                    y: yData,
-                    type: viz.chartType === 'bar' ? 'bar' : 'scatter',
-                    mode: viz.chartType === 'line' ? 'lines+markers' : undefined,
-                    marker: { color: '#3b82f6' }
-                }];
-            } else if (viz.chartType === 'pie') {
-                const labels = data.map(d => d[viz.xAxis]);
-                const values = data.map(d => d[viz.yAxis]);
-                
-                plotlyData = [{
-                    labels: labels,
-                    values: values,
-                    type: 'pie',
-                    textinfo: 'label+percent',
-                    textfont: { color: '#f8fafc' }
-                }];
-            } else {
-                // Default to bar chart
-                const xData = data.map(d => Object.values(d)[0]);
-                const yData = data.map(d => Object.values(d)[1]);
-                
-                plotlyData = [{
-                    x: xData,
-                    y: yData,
-                    type: 'bar',
-                    marker: { color: '#3b82f6' }
-                }];
+            // 데이터 컬럼 확인 및 매핑
+            const availableColumns = Object.keys(data[0] || {});
+            console.log('[DEBUG] 사용 가능한 컬럼들:', availableColumns);
+            
+            // LLM이 추천한 컬럼명이 실제 데이터에 있는지 확인
+            const xColumn = availableColumns.find(col => 
+                col === viz.xAxis || 
+                col.toLowerCase().includes(viz.xAxis?.toLowerCase()) ||
+                viz.xAxis?.toLowerCase().includes(col.toLowerCase())
+            ) || availableColumns[0];
+            
+            const yColumn = availableColumns.find(col => 
+                col === viz.yAxis || 
+                col.toLowerCase().includes(viz.yAxis?.toLowerCase()) ||
+                viz.yAxis?.toLowerCase().includes(col.toLowerCase())
+            ) || availableColumns[1];
+            
+            const seriesColumn = viz.seriesBy && viz.seriesBy !== 'null' && viz.seriesBy !== null && viz.seriesBy !== 'None' ? 
+                availableColumns.find(col => 
+                    col === viz.seriesBy || 
+                    col.toLowerCase().includes(viz.seriesBy?.toLowerCase()) ||
+                    viz.seriesBy?.toLowerCase().includes(col.toLowerCase())
+                ) : null;
+
+            console.log('[DEBUG] 매핑된 컬럼들:', { xColumn, yColumn, seriesColumn });
+
+            // 차트 타입에 따른 처리
+            switch (viz.chartType?.toLowerCase()) {
+                case 'bar':
+                    plotlyData = this.createBarChart(data, xColumn, yColumn, seriesColumn);
+                    break;
+                case 'line':
+                    plotlyData = this.createLineChart(data, xColumn, yColumn, seriesColumn);
+                    break;
+                case 'pie':
+                    plotlyData = this.createPieChart(data, xColumn, yColumn);
+                    layout.showlegend = true;
+                    break;
+                case 'scatter':
+                    plotlyData = this.createScatterChart(data, xColumn, yColumn, seriesColumn);
+                    break;
+                case 'heatmap':
+                    plotlyData = this.createHeatmapChart(data, xColumn, yColumn, seriesColumn);
+                    break;
+                default:
+                    // 기본값: bar 차트
+                    console.log('[DEBUG] 지원하지 않는 차트 타입, bar 차트로 대체:', viz.chartType);
+                    plotlyData = this.createBarChart(data, xColumn, yColumn, seriesColumn);
             }
+
+            // 축 레이블 업데이트
+            layout.xaxis.title = viz.xAxis || xColumn || 'X축';
+            layout.yaxis.title = viz.yAxis || yColumn || 'Y축';
+
+            console.log('[DEBUG] 최종 Plotly 데이터:', plotlyData);
+            console.log('[DEBUG] 최종 Layout:', layout);
 
             Plotly.newPlot(chartId, plotlyData, layout, {
                 responsive: true,
@@ -367,9 +375,133 @@ class QualityAnalysisApp {
             });
 
         } catch (error) {
-            console.error('Chart rendering error:', error);
+            console.error('[ERROR] 차트 렌더링 오류:', error);
             document.getElementById(chartId).innerHTML = '<p style="color: #ef4444;">차트 렌더링 오류가 발생했습니다.</p>';
         }
+    }
+
+    // 막대 차트 생성
+    createBarChart(data, xColumn, yColumn, seriesColumn) {
+        if (seriesColumn) {
+            // 시리즈별 그룹화
+            const seriesGroups = [...new Set(data.map(d => d[seriesColumn]))];
+            const xValues = [...new Set(data.map(d => d[xColumn]))];
+            
+            return seriesGroups.map(series => ({
+                x: xValues,
+                y: xValues.map(x => {
+                    const found = data.find(d => d[xColumn] == x && d[seriesColumn] == series);
+                    return found ? parseFloat(found[yColumn]) || 0 : 0;
+                }),
+                name: series,
+                type: 'bar',
+                marker: { opacity: 0.8 }
+            }));
+        } else {
+            // 단일 시리즈
+            return [{
+                x: data.map(d => d[xColumn]),
+                y: data.map(d => parseFloat(d[yColumn]) || 0),
+                type: 'bar',
+                marker: { color: '#3b82f6', opacity: 0.8 }
+            }];
+        }
+    }
+
+    // 선 차트 생성
+    createLineChart(data, xColumn, yColumn, seriesColumn) {
+        if (seriesColumn) {
+            // 시리즈별 그룹화
+            const seriesGroups = [...new Set(data.map(d => d[seriesColumn]))];
+            const xValues = [...new Set(data.map(d => d[xColumn]))].sort();
+            
+            return seriesGroups.map(series => ({
+                x: xValues,
+                y: xValues.map(x => {
+                    const found = data.find(d => d[xColumn] == x && d[seriesColumn] == series);
+                    return found ? parseFloat(found[yColumn]) || 0 : 0;
+                }),
+                name: series,
+                type: 'scatter',
+                mode: 'lines+markers',
+                line: { width: 3 },
+                marker: { size: 8 }
+            }));
+        } else {
+            // 단일 시리즈
+            return [{
+                x: data.map(d => d[xColumn]),
+                y: data.map(d => parseFloat(d[yColumn]) || 0),
+                type: 'scatter',
+                mode: 'lines+markers',
+                line: { color: '#3b82f6', width: 3 },
+                marker: { color: '#3b82f6', size: 8 }
+            }];
+        }
+    }
+
+    // 파이 차트 생성
+    createPieChart(data, xColumn, yColumn) {
+        return [{
+            labels: data.map(d => d[xColumn]),
+            values: data.map(d => parseFloat(d[yColumn]) || 0),
+            type: 'pie',
+            textinfo: 'label+percent',
+            textfont: { color: '#f8fafc' },
+            marker: {
+                colors: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#84cc16']
+            }
+        }];
+    }
+
+    // 산점도 차트 생성
+    createScatterChart(data, xColumn, yColumn, seriesColumn) {
+        if (seriesColumn) {
+            // 시리즈별 그룹화
+            const seriesGroups = [...new Set(data.map(d => d[seriesColumn]))];
+            
+            return seriesGroups.map(series => ({
+                x: data.filter(d => d[seriesColumn] == series).map(d => parseFloat(d[xColumn]) || 0),
+                y: data.filter(d => d[seriesColumn] == series).map(d => parseFloat(d[yColumn]) || 0),
+                name: series,
+                type: 'scatter',
+                mode: 'markers',
+                marker: { size: 10, opacity: 0.7 }
+            }));
+        } else {
+            // 단일 시리즈
+            return [{
+                x: data.map(d => parseFloat(d[xColumn]) || 0),
+                y: data.map(d => parseFloat(d[yColumn]) || 0),
+                type: 'scatter',
+                mode: 'markers',
+                marker: { color: '#3b82f6', size: 10, opacity: 0.7 }
+            }];
+        }
+    }
+
+    // 히트맵 차트 생성
+    createHeatmapChart(data, xColumn, yColumn, valueColumn) {
+        // 히트맵은 x, y 축과 값(z)이 필요
+        const xValues = [...new Set(data.map(d => d[xColumn]))];
+        const yValues = [...new Set(data.map(d => d[yColumn]))];
+        const zColumn = valueColumn || Object.keys(data[0]).find(k => k !== xColumn && k !== yColumn);
+        
+        const z = yValues.map(y => 
+            xValues.map(x => {
+                const found = data.find(d => d[xColumn] == x && d[yColumn] == y);
+                return found ? parseFloat(found[zColumn]) || 0 : 0;
+            })
+        );
+
+        return [{
+            x: xValues,
+            y: yValues,
+            z: z,
+            type: 'heatmap',
+            colorscale: 'Blues',
+            showscale: true
+        }];
     }
 
     handleChartAction(button) {
@@ -485,6 +617,12 @@ class QualityAnalysisApp {
                 chatInput.placeholder = `${metricName}에 대해 궁금한 점을 물어보세요...`;
                 chatInput.focus();
                 
+                // 품질부적합 선택 시 상단영역1과 상단영역2에 차트 생성
+                if (metricName === '품질부적합') {
+                    this.createTopAreaChart();
+                    this.createTopArea2Chart();
+                }
+                
                 // 성공 메시지 표시
                 this.showSuccess(`${metricName} 분석이 시작되었습니다.`);
             }
@@ -581,6 +719,175 @@ class QualityAnalysisApp {
 
     showInfo(message) {
         this.showToast(message, 'info');
+    }
+
+    async createTopAreaChart() {
+        try {
+            // 연도별 품질부적합률 데이터 요청
+            const response = await fetch('/api/yearly_quality_data', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    session_id: this.currentSessionId
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to fetch yearly quality data');
+            }
+
+            const data = await response.json();
+            
+            // 상단영역1에 차트 생성
+            const topArea1 = document.querySelector('.top-area-1');
+            topArea1.innerHTML = '<div id="top-chart-1" style="width: 100%; height: 100%;"></div>';
+            
+            // 연도별 색상 설정 (2024년: 빨간색, 2025년: 파란색)
+            const colors = data.years.map(year => {
+                return year === '2024' ? '#ef4444' : '#3b82f6'; // 빨간색 : 파란색
+            });
+            
+            const borderColors = data.years.map(year => {
+                return year === '2024' ? '#dc2626' : '#1e40af'; // 어두운 빨간색 : 어두운 파란색
+            });
+
+            // Plotly 차트 생성
+            const chartData = [{
+                x: data.years,
+                y: data.quality_rates,
+                type: 'bar',
+                marker: {
+                    color: colors,
+                    line: {
+                        color: borderColors,
+                        width: 1
+                    }
+                },
+                text: data.quality_rates.map(rate => `${rate.toFixed(2)}%`),
+                textposition: 'auto',
+                hovertemplate: '<b>%{x}년</b><br>품질부적합률: %{y:.2f}%<extra></extra>'
+            }];
+
+            const layout = {
+                title: {
+                    text: '연도별 품질부적합률',
+                    font: { color: '#f8fafc', size: 16 },
+                    x: 0.5
+                },
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                plot_bgcolor: 'rgba(0,0,0,0)',
+                font: { color: '#f8fafc' },
+                xaxis: {
+                    title: '연도',
+                    showgrid: false,
+                    tickcolor: '#6b7280',
+                    linecolor: '#6b7280'
+                },
+                yaxis: {
+                    title: '품질부적합률 (%)',
+                    showgrid: false,
+                    tickcolor: '#6b7280',
+                    linecolor: '#6b7280'
+                },
+                margin: { t: 50, r: 30, b: 50, l: 60 }
+            };
+
+            const config = {
+                responsive: true,
+                displayModeBar: false
+            };
+
+            Plotly.newPlot('top-chart-1', chartData, layout, config);
+
+        } catch (error) {
+            console.error('Error creating top area chart:', error);
+            const topArea1 = document.querySelector('.top-area-1');
+            topArea1.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 100%; color: #ef4444;">차트 로딩 중 오류가 발생했습니다.</div>';
+        }
+    }
+
+    async createTopArea2Chart() {
+        try {
+            // 2025년 1월~3월 월별 품질부적합률 추세 데이터 요청
+            const response = await fetch('/api/monthly_quality_trend', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    session_id: this.currentSessionId
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to fetch monthly quality trend data');
+            }
+
+            const data = await response.json();
+            
+            // 상단영역2에 차트 생성
+            const topArea2 = document.querySelector('.top-area-2');
+            topArea2.innerHTML = '<div id="top-chart-2" style="width: 100%; height: 100%;"></div>';
+
+            // Plotly 꺾은선 차트 생성
+            const chartData = [{
+                x: data.months,
+                y: data.quality_rates,
+                type: 'scatter',
+                mode: 'lines+markers',
+                line: {
+                    color: '#3b82f6', // 2025년 막대그래프와 동일한 파란색
+                    width: 3
+                },
+                marker: {
+                    color: '#1e40af', // 진한 파란색 꼭지점
+                    size: 8,
+                    line: {
+                        color: '#1e3a8a', // 더 진한 파란색 테두리
+                        width: 2
+                    }
+                },
+                hovertemplate: '<b>2025년 %{x}</b><br>품질부적합률: %{y:.2f}%<extra></extra>'
+            }];
+
+            const layout = {
+                title: {
+                    text: '2025년 품질부적합률 추이',
+                    font: { color: '#f8fafc', size: 16 },
+                    x: 0.5
+                },
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                plot_bgcolor: 'rgba(0,0,0,0)',
+                font: { color: '#f8fafc' },
+                xaxis: {
+                    title: '월',
+                    showgrid: false,
+                    tickcolor: '#6b7280',
+                    linecolor: '#6b7280'
+                },
+                yaxis: {
+                    title: '품질부적합률 (%)',
+                    showgrid: false,
+                    tickcolor: '#6b7280',
+                    linecolor: '#6b7280'
+                },
+                margin: { t: 50, r: 30, b: 50, l: 60 }
+            };
+
+            const config = {
+                responsive: true,
+                displayModeBar: false
+            };
+
+            Plotly.newPlot('top-chart-2', chartData, layout, config);
+
+        } catch (error) {
+            console.error('Error creating top area 2 chart:', error);
+            const topArea2 = document.querySelector('.top-area-2');
+            topArea2.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 100%; color: #ef4444;">차트 로딩 중 오류가 발생했습니다.</div>';
+        }
     }
 
     showToast(message, type) {
