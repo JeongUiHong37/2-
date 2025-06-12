@@ -84,14 +84,13 @@ DOMAIN_KNOWLEDGE = """
 - '제품' 기준은 반드시 **품종그룹명**과 **제품규격약호** 중 어떤 것을 기준으로 분석할 것인지 확인해야 함. 
 - 날짜는 모두 YYYYMMDD 형식이며, 월/분기 단위 집계 시 SUBSTR 등을 활용할 수 있음
 - 사용자가 '공정별', '품종별', '고객사별' 등의 기준을 언급한 경우, SQL 생성 시 GROUP BY 또는 WHERE 조건에 반영되어야 함
+- 나눗셈(%) 연산 시 반드시 분자 또는 분모에 1.0을 곱해 소수점까지 계산하세요. 예시 : (SUM(QLY_INC_HPW) * 1.0 / SUM(TR_F_PRODQUANTITY)) * 100
 
 ---
 
 이 도메인 지식은 모든 LLM 분석 및 SQL 생성 요청에 앞서 참조되어야 합니다.  
 LLM은 사용자에게 명확하고 의사결정 가능한 형태의 정보로 분석 결과를 제공해야 합니다.
 """
-
-# 모든 개념 정의는 LLM이 DOMAIN_KNOWLEDGE를 기반으로 동적 생성
 
 class LLMService:
     def __init__(self, db_service=None):
@@ -102,14 +101,19 @@ class LLMService:
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise ValueError("OPENAI_API_KEY environment variable is required")
+        
+        print(f"[DEBUG] OpenAI API 키 설정됨: {api_key[:10]}...{api_key[-10:]}")
         self.client = OpenAI(api_key=api_key)
-
-# _get_concept_definition 메서드 제거 - 모든 개념 정의는 LLM이 처리
 
     async def _call_openai(self, messages: List[Dict], temperature: float = 0.1, return_json: bool = True, retry_count: int = 2) -> Union[Dict[str, Any], str]:
         """OpenAI API 호출 및 응답 처리를 위한 헬퍼 메서드"""
         for attempt in range(retry_count):
             try:
+                print(f"[DEBUG] OpenAI API 호출 시도 {attempt + 1}/{retry_count}")
+                print(f"[DEBUG] 모델: {self.model}")
+                print(f"[DEBUG] Temperature: {temperature}")
+                print(f"[DEBUG] Messages: {len(messages)}개")
+                
                 response = self.client.chat.completions.create(
                     model=self.model,
                     messages=messages,
@@ -117,113 +121,74 @@ class LLMService:
                 )
                 
                 content = response.choices[0].message.content
+                print(f"[DEBUG] API 응답 길이: {len(content) if content else 0}")
+                print(f"[DEBUG] LLM 응답 원문: {content}")
+                
                 if not content or not content.strip():
+                    print(f"[DEBUG] 빈 응답 수신, 재시도: {attempt < retry_count - 1}")
                     if attempt < retry_count - 1:
-                        # 재시도 시 더 높은 temperature로 다양한 응답 유도
                         temperature = min(0.7, temperature + 0.3)
                         continue
-                    # 최종 실패 시에도 LLM이 처리할 수 있는 구조 반환
                     return {"type": "error", "message": "LLM 응답 생성 실패", "retry_attempted": True} if return_json else "응답을 생성할 수 없습니다."
                 
                 if return_json:
                     try:
-                        if content.strip().startswith("{"):
-                            result = json.loads(content)
-                            # Convert string "true"/"false" to boolean for needsConfirmation
-                            if "needsConfirmation" in result:
-                                if isinstance(result["needsConfirmation"], str):
-                                    if result["needsConfirmation"].lower() in ["true", "1", "yes"]:
-                                        result["needsConfirmation"] = True
-                                    else:
-                                        result["needsConfirmation"] = False
-                                elif not isinstance(result["needsConfirmation"], bool):
+                        print(f"[DEBUG] JSON 파싱 시도 - 응답 시작: {content[:200]}...")
+                        content_stripped = content.strip()
+                        if not content_stripped.startswith("{"):
+                            print(f"[DEBUG] JSON 형식이 아님 - 전체 응답: {content}")
+                            if attempt < retry_count - 1:
+                                messages.append({"role": "user", "content": "반드시 설명 없이 JSON 형식만 반환하세요. 마크다운 코드블록(예: ```json)도 사용하지 마세요."})
+                                continue
+                            return {"type": "error", "message": "JSON 형식 응답 생성 실패", "raw_response": content}
+                        result = json.loads(content_stripped)
+                        if "needsConfirmation" in result:
+                            if isinstance(result["needsConfirmation"], str):
+                                if result["needsConfirmation"].lower() in ["true", "1", "yes"]:
+                                    result["needsConfirmation"] = True
+                                else:
                                     result["needsConfirmation"] = False
-                            return result
-                        
-                        # JSON 형식이 아닌 경우 재시도
-                        if attempt < retry_count - 1:
-                            # JSON 형식 요구를 강조하는 메시지 추가
-                            messages.append({"role": "user", "content": "JSON 형식으로만 응답해주세요."})
-                            continue
-                        return {"type": "error", "message": "JSON 형식 응답 생성 실패", "raw_response": content}
-                        
+                            elif not isinstance(result["needsConfirmation"], bool):
+                                result["needsConfirmation"] = False
+                        print(f"[DEBUG] JSON 파싱 성공 - 키들: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}")
+                        return result
                     except json.JSONDecodeError as e:
+                        print(f"[DEBUG] JSON 파싱 오류: {str(e)}")
+                        print(f"[DEBUG] 파싱 실패한 전체 응답: {content}")
                         if attempt < retry_count - 1:
-                            # JSON 파싱 오류 시 재시도
-                            messages.append({"role": "user", "content": "올바른 JSON 형식으로 다시 응답해주세요."})
+                            messages.append({"role": "user", "content": "JSON 구문 오류가 있습니다. 설명 없이 JSON 형식만 반환하세요. 마크다운 코드블록(예: ```json)도 사용하지 마세요."})
                             continue
                         return {"type": "error", "message": f"JSON 파싱 오류: {str(e)}", "raw_response": content}
                 else:
                     return content.strip()
-                    
             except Exception as e:
+                print(f"[DEBUG] API 호출 예외: {str(e)}")
                 if attempt < retry_count - 1:
-                    # API 오류 시 재시도
                     continue
-                # 최종 실패 시에도 구조화된 응답 반환
                 return {"type": "error", "message": f"API 호출 오류: {str(e)}", "retry_attempted": True} if return_json else f"시스템 오류가 발생했습니다: {str(e)}"
 
     async def process_query(self, query: str, chat_history: List[Dict]) -> Dict[str, Any]:
-        """전체 5단계 프로세스를 처리하는 메인 메서드"""
-        
-        # 0단계: 쿼리 타입 분류
-        classification = await self._classify_query(query)
-        if "type" in classification and classification["type"] == "error":
-            return {
-                "message": "쿼리 분류 중 오류가 발생했습니다.",
-                "type": "error",
-                "metadata": classification
-            }
-
-        if classification["queryType"] == "concept_lookup":
-            # GPT를 통한 개념 정의 생성
-            concept_response = await self._generate_concept_answer(query)
-            return {
-                "message": concept_response,
-                "type": "concept",
-                "metadata": {
-                    "queryType": "concept_lookup",
-                    "query": query
-                }
-            }
-
-        # 1단계: 불명확성 체크
-        confirmation = await self._check_confirmation_needed(query, chat_history)
-        if "type" in confirmation and confirmation["type"] == "error":
-            return {
-                "message": "쿼리 확인 중 오류가 발생했습니다.",
-                "type": "error",
-                "metadata": confirmation
-            }
-
-        if confirmation.get("needsConfirmation", False):
-            return {
-                "message": confirmation["confirmationQuestion"],
-                "type": "confirmation",
-                "metadata": {
-                    "needsConfirmation": True,
-                    "candidateIntents": confirmation.get("candidateIntents", []),
-                    "reason": confirmation.get("reason", "")
-                }
-            }
-
-        # 2단계: SQL 쿼리 생성
-        sql_generation = await self._generate_sql(query, chat_history, confirmation)
+        """사용자 쿼리 처리 메인 함수 (1~2단계는 절대 수정 금지)"""
+        # 1~2단계: SQL 생성 (수정 금지)
+        sql_generation = await self._generate_sql(query, chat_history, {})
         if "type" in sql_generation and sql_generation["type"] == "error":
-            return {
-                "message": "SQL 생성 중 오류가 발생했습니다.",
-                "type": "error",
-                "metadata": sql_generation
-            }
+            return sql_generation
+        if "sqlQueries" not in sql_generation or not sql_generation["sqlQueries"]:
+            return {"type": "error", "message": "SQL 쿼리 생성 실패", "metadata": {}}
 
-        # 4단계: SQL 실행
+        # 3단계: SQL 실행 및 결과 추출
         results = []
         for sql_query in sql_generation["sqlQueries"]:
             try:
                 df = self.db_service.execute_query(sql_query["query"])
+                df = df.astype(str)
+                if df.empty or (df.fillna(0).sum().sum() == 0):
+                    return {
+                        "message": "데이터 없음 또는 오류 가능성: 쿼리 결과가 비어있거나 모두 0입니다.",
+                        "type": "error",
+                        "metadata": {"sql_result": df.to_dict('records'), "query": sql_query["query"]}
+                    }
                 results.append({
-                    "description": sql_query["description"],
-                    "purpose": sql_query.get("purpose", ""),
                     "query": sql_query["query"],
                     "data": df.to_dict('records'),
                     "columns": df.columns.tolist()
@@ -235,7 +200,7 @@ class LLMService:
                     "metadata": {"error": str(e), "query": sql_query["query"]}
                 }
 
-        # 5단계: 시각화 설정 및 요약 생성
+        # 4단계: 실행 결과를 LLM에 전달하여 시각화 정보만 추천받음
         visualization = await self._generate_visualization_config(results, query, chat_history)
         if "type" in visualization and visualization["type"] == "error":
             return {
@@ -244,14 +209,14 @@ class LLMService:
                 "metadata": visualization
             }
 
+        # 5~6단계: summary, insights 등 부가 설명 없이 시각화 정보만 반환
         return {
-            "message": visualization.get("summary", "분석이 완료되었습니다."),
+            "message": "분석이 완료되었습니다.",
             "type": "analysis",
             "metadata": {
                 "sql_results": results,
                 "visualization": visualization,
-                "confirmedIntent": sql_generation.get("confirmedIntent", ""),
-                "insights": visualization.get("insights", [])
+                "confirmedIntent": sql_generation.get("confirmedIntent", "")
             }
         }
 
@@ -271,29 +236,25 @@ class LLMService:
         
         response = await self._call_openai(messages, temperature=0.3, return_json=False)
         
-        # LLM이 모든 상황을 처리하도록 함 - fallback 제거
         return response
 
     async def _classify_query(self, query: str) -> Dict[str, Any]:
         """0단계: 쿼리 타입 분류"""
+        print(f"[DEBUG] 쿼리 분류 시작: {query}")
+        
         messages = [
-            {"role": "system", "content": f"""
-{self.domain_knowledge}
-
-사용자의 질문을 다음 두 가지 유형으로 분류해주세요:
+            {"role": "system", "content": """사용자의 질문을 분류해주세요:
 1. concept_lookup: 용어나 개념의 정의를 묻는 질문
-2. analytical: 데이터 분석이나 비교, 데이터의 시각화를 요구하는 질문으로 SQL Query 작성이 필요한 질문
+2. analytical: 데이터 분석이나 비교를 요구하는 질문
 
-JSON 형식으로 응답해주세요:
-{{
-    "queryType": "concept_lookup" 또는 "analytical",
-    "reason": "분류 이유 설명"
-}}"""},
+JSON 형식으로 응답:
+{"queryType": "concept_lookup" 또는 "analytical", "reason": "이유"}"""},
             {"role": "user", "content": query}
         ]
         
         result = await self._call_openai(messages, return_json=True)
-        # LLM이 에러 상황도 처리하도록 함 - 하드코딩된 fallback 제거
+        print(f"[DEBUG] OpenAI 분류 결과: {result}")
+        
         return result
 
     async def _check_confirmation_needed(self, query: str, chat_history: List[Dict]) -> Dict[str, Any]:
@@ -343,14 +304,12 @@ JSON 형식으로 응답해주세요:
         ]
         
         result = await self._call_openai(messages, return_json=True)
-        # LLM이 에러 상황도 처리하도록 함 - 하드코딩된 fallback 제거
         return result
 
     async def _generate_sql(self, query: str, chat_history: List[Dict], confirmation: Dict[str, Any]) -> Dict[str, Any]:
         """2단계: SQL 쿼리 생성"""
+        print(f"[DEBUG] SQL 생성 시작 - needsConfirmation: {confirmation.get('needsConfirmation', False)}")
         recent_context = "\n".join([f"{msg['role']}: {msg['content']}" for msg in chat_history[-4:] if chat_history])
-        
-        # 확인 응답 정보 추가
         confirmation_info = ""
         if confirmation and not confirmation.get("needsConfirmation", False):
             selected_intent = None
@@ -360,7 +319,6 @@ JSON 형식으로 응답해주세요:
                     break
             if selected_intent:
                 confirmation_info = f"\n선택된 분석 기준: {selected_intent}"
-        
         messages = [
             {"role": "system", "content": f"""
 {self.domain_knowledge}
@@ -370,46 +328,72 @@ JSON 형식으로 응답해주세요:
 SQL 생성 규칙:
 - SQLite 문법 사용
 - 날짜는 'YYYYMMDD' 문자열 형식
-- 불량률 = (QLY_INC_HPW / TR_F_PRODQUANTITY) * 100
+- 품질부적합률 = (QLY_INC_HPW / TR_F_PRODQUANTITY) * 100
+- 년도 비교 시: DAY_CD에서 SUBSTR(DAY_CD, 1, 4)로 년도 추출
+- 24년 = '2024', 25년 = '2025'
 
-JSON 형식으로 응답해주세요:
+**중요: 반드시 설명 없이 JSON 형식만 반환하세요. 마크다운 코드블록(예: ```json)도 사용하지 마세요. 다른 텍스트는 포함하지 마세요.**
+
 {{
     "confirmedIntent": "확정된 분석 의도",
     "sqlQueries": [
         {{
-            "description": "쿼리 설명",
+
             "query": "SQL 쿼리",
-            "purpose": "해당 쿼리의 목적"
+
         }}
     ],
-    "requiresPostprocessing": true/false,
-    "postprocessingNote": "후처리 방식 설명"
+}}
+
+예시 - 24년과 25년 품질부적합률 비교:
+{{
+    "confirmedIntent": "2024년과 2025년의 품질부적합률 비교 분석",
+    "sqlQueries": [
+        {{
+            "query": "SELECT SUBSTR(DAY_CD, 1, 4) as YEAR, SUM(QLY_INC_HPW) as 총품질부적합량, SUM(TR_F_PRODQUANTITY) as 총생산량, (SUM(QLY_INC_HPW) / SUM(TR_F_PRODQUANTITY)) * 100 as 품질부적합률 FROM TB_SUM_MQS_QMHT200 WHERE SUBSTR(DAY_CD, 1, 4) IN ('2024', '2025') GROUP BY SUBSTR(DAY_CD, 1, 4) ORDER BY YEAR",
+        }}
+    ],
 }}"""},
             {"role": "user", "content": f"대화 맥락:\n{recent_context}\n\n분석 요청: {query}"}
         ]
-        
-        result = await self._call_openai(messages)
-        # LLM이 에러 상황에서도 적절한 SQL을 생성하도록 함 - 하드코딩된 기본 SQL 제거
+        result = await self._call_openai(messages, return_json=True)
+        print("[DEBUG] _generate_sql() LLM 응답 구조:")
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        if isinstance(result, dict) and "sqlQueries" in result:
+            for i, query in enumerate(result["sqlQueries"]):
+                print(f"[DEBUG] LLM 생성 SQL: {str(query.get('query', ''))}")
+        if isinstance(result, dict):
+            print(f"[DEBUG] result keys: {list(result.keys())}")
+            if "sqlQueries" in result:
+                print(f"[DEBUG] sqlQueries 존재: {len(result['sqlQueries'])}개")
+                for i, query in enumerate(result['sqlQueries']):
+                    print(f"[DEBUG] Query {i+1}: {str(query)}")
+            else:
+                print(f"[DEBUG] sqlQueries 키가 없음!")
+            if "type" in result and result["type"] == "error":
+                print(f"[DEBUG] 오류 응답 감지: {str(result.get('message', 'Unknown error'))}")
+        else:
+            print(f"[DEBUG] result가 딕셔너리가 아님: {str(result)}")
         return result
 
     async def _generate_visualization_config(self, sql_results: List[Dict], query: str, chat_history: List[Dict]) -> Dict[str, Any]:
-        """5단계: 시각화 설정 및 요약 생성"""
+        """5단계: 시각화 정보만 추천 (chartType, xAxis, yAxis, seriesBy)"""
         results_str = json.dumps(sql_results, ensure_ascii=False, indent=2)
-        
         messages = [
             {"role": "system", "content": f"""
 {self.domain_knowledge}
 
-SQL 실행 결과를 기반으로 적절한 시각화 설정과 요약을 생성하세요.
+SQL 실행 결과를 기반으로 실제 차트 생성에 필요한 시각화 정보만 JSON으로 추천하세요.
+- 반드시 chartType, xAxis, yAxis, seriesBy만 포함
+- summary, insights 등 부가 설명은 절대 포함하지 마세요.
+- 마크다운 코드블럭(예: ```json), 설명 텍스트 등은 절대 추가하지 마세요. JSON만 반환하세요.
 
-JSON 형식으로 응답해주세요:
+JSON 예시:
 {{
-    "chartType": "line/bar/scatter/pie 중 하나",
-    "xAxis": "x축에 사용할 컬럼명",
-    "yAxis": "y축에 사용할 컬럼명",
-    "seriesBy": "시리즈 구분에 사용할 컬럼명 (선택)",
-    "summary": "분석 결과에 대한 상세한 설명",
-    "insights": ["주요 인사이트 1", "주요 인사이트 2"]
+    "chartType": "bar",
+    "xAxis": "YEAR",
+    "yAxis": "품질부적합률",
+    "seriesBy": null
 }}"""},
             {"role": "user", "content": f"""
 분석 요청: {query}
@@ -417,7 +401,5 @@ JSON 형식으로 응답해주세요:
 SQL 실행 결과:
 {results_str}"""}
         ]
-        
-        result = await self._call_openai(messages)
-        # LLM이 에러 상황에서도 적절한 시각화 설정을 생성하도록 함 - 하드코딩된 fallback 제거
+        result = await self._call_openai(messages, return_json=True)
         return result

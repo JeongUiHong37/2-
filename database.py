@@ -118,16 +118,18 @@ class DatabaseService:
     def execute_query(self, query: str) -> pd.DataFrame:
         """Execute SQL query and return results as DataFrame"""
         conn = sqlite3.connect(self.db_path)
-        
         try:
-            print(f"\nExecuting query in database: {query}")  # 디버깅용 로그 추가
+            print(f"\n[DEBUG] Executing query in database: {query}")
             try:
                 df = pd.read_sql_query(query, conn)
-                print(f"Query executed successfully. Result shape: {df.shape}")  # 디버깅용 로그 추가
+                print(f"[DEBUG] DataFrame shape: {df.shape}")
+                print(f"[DEBUG] DataFrame columns: {df.columns.tolist()}")
+                # 각 셀 값을 str로 변환하여 안전하게 출력
+                head_str = df.head().astype(str)
+                print(f"[DEBUG] DataFrame head (as str):\n{head_str}\n")
                 return df
             except pd.io.sql.DatabaseError as e:
                 print(f"Pandas SQL error: {str(e)}")
-                # SQLite 직접 실행 시도
                 cursor = conn.cursor()
                 cursor.execute(query)
                 print("Direct cursor execution succeeded")
