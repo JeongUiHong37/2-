@@ -44,6 +44,16 @@ async def lifespan(app: FastAPI):
         else:
             print("Database already contains data")
             
+        # --- 여기서 기본 채팅방 5개 생성 ---
+        if not sessions:
+            for _ in range(5):
+                session_id = str(uuid.uuid4())
+                sessions[session_id] = ChatSession(
+                    session_id=session_id,
+                    chat_history=[],
+                    current_state="idle",
+                    created_at=datetime.now()
+                )
     except Exception as e:
         print(f"Error during startup: {e}")
         raise
@@ -158,29 +168,37 @@ async def reset_session(request: ResetRequest):
     
     return {"status": "success", "message": "Session reset successfully"}
 
+@app.post("/api/delete_session")
+async def delete_session(request: ResetRequest):
+    """채팅 세션 삭제"""
+    if request.session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    del sessions[request.session_id]
+    return {"status": "success"}
+
 @app.get("/api/sessions")
 async def get_sessions():
     """Get list of all sessions (for chat history panel)"""
     try:
         session_list = []
         for session_id, session in sessions.items():
-            if session.chat_history:
-                # Get first user message as title
-                first_message = next(
-                    (msg for msg in session.chat_history if msg["role"] == "user"),
-                    {"content": "새 대화"}
-                )
-                session_list.append({
-                    "session_id": session_id,
-                    "title": first_message["content"][:50] + "..." if len(first_message["content"]) > 50 else first_message["content"],
-                    "created_at": session.created_at.isoformat(),
-                    "message_count": len(session.chat_history)
-                })
-        
+            # 첫 user 메시지 요약(30자 이내, 줄바꿈 제거)
+            first_message = next(
+                (msg for msg in session.chat_history if msg["role"] == "user"),
+                {"content": "새 대화"}
+            )
+            summary = first_message["content"].replace("\n", " ").strip()
+            if len(summary) > 30:
+                summary = summary[:30] + "..."
+            session_list.append({
+                "session_id": session_id,
+                "title": summary,
+                "created_at": session.created_at.isoformat(),
+                "message_count": len(session.chat_history)
+            })
         # Sort by creation time, newest first
         session_list.sort(key=lambda x: x["created_at"], reverse=True)
         return session_list
-        
     except Exception as e:
         print(f"Error in get_sessions: {e}")
         raise HTTPException(status_code=500, detail=str(e))

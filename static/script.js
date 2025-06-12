@@ -10,6 +10,16 @@ class QualityAnalysisApp {
         await this.startNewSession();
         await this.loadSessions();
         this.setupChartContainer();
+        // 플러스 버튼 이벤트 바인딩
+        setTimeout(() => {
+            const newBtn = document.getElementById('new-session-btn');
+            if (newBtn) {
+                newBtn.addEventListener('click', async () => {
+                    await this.startNewSession();
+                    await this.loadSession(this.currentSessionId);
+                });
+            }
+        }, 0);
     }
 
     bindEvents() {
@@ -52,8 +62,18 @@ class QualityAnalysisApp {
             }
         });
 
-        // Session selection
+        // Session selection & 삭제 이벤트 위임
         document.addEventListener('click', (e) => {
+            // 삭제 버튼 클릭
+            if (e.target.classList.contains('session-delete-btn')) {
+                e.stopPropagation();
+                const sessionId = e.target.dataset.sessionId;
+                if (confirm('이 채팅방을 삭제하시겠습니까?')) {
+                    this.deleteSession(sessionId);
+                }
+                return;
+            }
+            // 채팅방 선택
             if (e.target.closest('.session-item')) {
                 const sessionId = e.target.closest('.session-item').dataset.sessionId;
                 this.loadSession(sessionId);
@@ -701,14 +721,15 @@ class QualityAnalysisApp {
 
             const sessions = await response.json();
             const container = document.querySelector('.chat-sessions');
-            
+            const currentId = this.currentSessionId;
             container.innerHTML = sessions.map(session => `
-                <li class="session-item" data-session-id="${session.session_id}">
-                    <div class="session-title">${session.title}</div>
+                <li class="session-item${session.session_id === currentId ? ' active' : ''}" data-session-id="${session.session_id}">
+                    <span class="session-title">${session.title}</span>
+                    <span class="session-status ${session.session_id === currentId ? 'active' : 'inactive'}"></span>
+                    <button class="session-delete-btn" title="채팅방 삭제" data-session-id="${session.session_id}">&#128465;</button>
                     <div class="session-meta">${session.message_count}개 메시지 • ${new Date(session.created_at).toLocaleDateString()}</div>
                 </li>
             `).join('');
-
         } catch (error) {
             console.error('Error loading sessions:', error);
         }
@@ -733,9 +754,33 @@ class QualityAnalysisApp {
 
             this.showInfo('이전 대화를 불러왔습니다.');
 
+            // 채팅방 리스트 active 상태 즉시 반영
+            await this.loadSessions();
+
         } catch (error) {
             console.error('Error loading session:', error);
             this.showError('세션을 불러올 수 없습니다.');
+        }
+    }
+
+    async deleteSession(sessionId) {
+        try {
+            const response = await fetch('/api/delete_session', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session_id: sessionId })
+            });
+            if (!response.ok) throw new Error('삭제 실패');
+            // 삭제 후 리스트 갱신
+            await this.loadSessions();
+            // 현재 삭제한 세션이 선택된 세션이면, 아무것도 선택 안 함
+            if (this.currentSessionId === sessionId) {
+                this.currentSessionId = null;
+                document.getElementById('chat-messages').innerHTML = '';
+            }
+            this.showSuccess('채팅방이 삭제되었습니다.');
+        } catch (error) {
+            this.showError('채팅방 삭제 중 오류 발생');
         }
     }
 

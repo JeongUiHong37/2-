@@ -13,7 +13,7 @@
         <div class="left-panel">
             <!-- Metrics Panel -->
             <div class="metrics-panel">
-                <h2 class="panel-title">지표 목록</h2>
+                <h2 class="panel-title"><span class="section-icon">📊</span>지표 목록</h2>
                 <ul class="metrics-list">
                     <li class="metric-item">
                         <button class="metric-button">판매</button>
@@ -43,7 +43,10 @@
 
             <!-- Chat History Panel -->
             <div class="chat-history-panel">
-                <h2 class="panel-title">채팅방 목록</h2>
+                <div class="chat-title-row" style="display: flex; align-items: center; justify-content: space-between;">
+                    <h2 class="panel-title" style="margin-bottom: 0;"><span class="section-icon">💬</span>채팅방 목록</h2>
+                    <button id="new-session-btn" class="new-session-btn" title="새 대화 시작">+</button>
+                </div>
                 <ul class="chat-sessions">
                     <!-- Sessions will be loaded dynamically -->
                 </ul>
@@ -73,7 +76,7 @@
         <!-- Right Panel - Chat -->
         <div class="right-panel">
             <div class="chat-header">
-                <h2 class="chat-title">LLM 분석</h2>
+                <h2 class="chat-title"><span class="section-icon">🤖</span>LLM 분석</h2>
                 <button id="reset-btn" class="reset-btn">Reset</button>
             </div>
             
