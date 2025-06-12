@@ -301,12 +301,12 @@ class QualityAnalysisApp {
                 font: { color: '#f8fafc' },
                 xaxis: { 
                     title: viz.xAxis || 'X축',
-                    gridcolor: '#475569',
+                    showgrid: false,
                     color: '#f8fafc'
                 },
                 yaxis: { 
                     title: viz.yAxis || 'Y축',
-                    gridcolor: '#475569',
+                    showgrid: false,
                     color: '#f8fafc'
                 },
                 margin: { t: 50, r: 50, b: 50, l: 50 }
