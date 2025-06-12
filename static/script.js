@@ -442,8 +442,7 @@ class QualityAnalysisApp {
             return;
         }
 
-        const metric = element.textContent.trim();
-        
+        const metricName = element.textContent;
         try {
             const response = await fetch('/api/select_metric', {
                 method: 'POST',
@@ -452,7 +451,7 @@ class QualityAnalysisApp {
                 },
                 body: JSON.stringify({
                     session_id: this.currentSessionId,
-                    metric: metric
+                    metric: metricName
                 })
             });
 
@@ -461,7 +460,20 @@ class QualityAnalysisApp {
             }
 
             const data = await response.json();
-            this.handleChatResponse(data);
+            if (data.panels_active) {
+                // 차트 패널과 채팅 패널 활성화
+                document.querySelector('.center-panel').classList.add('active');
+                document.querySelector('.right-panel').classList.add('active');
+                
+                // 채팅 입력창 활성화 및 포커스
+                const chatInput = document.getElementById('chat-input');
+                chatInput.disabled = false;
+                chatInput.placeholder = `${metricName}에 대해 궁금한 점을 물어보세요...`;
+                chatInput.focus();
+                
+                // 성공 메시지 표시
+                this.showSuccess(`${metricName} 분석이 시작되었습니다.`);
+            }
 
         } catch (error) {
             console.error('Error selecting metric:', error);

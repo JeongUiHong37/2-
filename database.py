@@ -120,11 +120,29 @@ class DatabaseService:
         conn = sqlite3.connect(self.db_path)
         
         try:
-            df = pd.read_sql_query(query, conn)
-            return df
+            print(f"\nExecuting query in database: {query}")  # 디버깅용 로그 추가
+            try:
+                df = pd.read_sql_query(query, conn)
+                print(f"Query executed successfully. Result shape: {df.shape}")  # 디버깅용 로그 추가
+                return df
+            except pd.io.sql.DatabaseError as e:
+                print(f"Pandas SQL error: {str(e)}")
+                # SQLite 직접 실행 시도
+                cursor = conn.cursor()
+                cursor.execute(query)
+                print("Direct cursor execution succeeded")
+                raise
+            except sqlite3.Error as e:
+                print(f"SQLite error: {str(e)}")
+                raise
+            except Exception as e:
+                print(f"Other error during query execution: {str(e)}")
+                raise
         except Exception as e:
             print(f"Error executing query: {e}")
             print(f"Query: {query}")
+            print(f"Database path: {self.db_path}")
+            print(f"Database exists: {os.path.exists(self.db_path)}")
             raise
         finally:
             conn.close()

@@ -162,6 +162,14 @@ body {
     padding: 1.5rem;
     overflow-y: auto;
     position: relative;
+    opacity: 0.5;
+    pointer-events: none;
+    transition: all 0.3s ease;
+}
+
+.center-panel.active {
+    opacity: 1;
+    pointer-events: auto;
 }
 
 .charts-container {
@@ -250,6 +258,14 @@ body {
     background: var(--primary-blue);
     display: flex;
     flex-direction: column;
+    opacity: 0.5;
+    pointer-events: none;
+    transition: all 0.3s ease;
+}
+
+.right-panel.active {
+    opacity: 1;
+    pointer-events: auto;
 }
 
 .chat-header {
@@ -347,16 +363,19 @@ body {
 }
 
 .chat-input {
-    flex: 1;
-    padding: 0.75rem;
-    background: var(--secondary-blue);
-    border: 1px solid var(--border-color);
-    border-radius: 0.5rem;
-    color: var(--text-primary);
-    font-size: 0.875rem;
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
     resize: none;
-    max-height: 100px;
-    min-height: 40px;
+    font-size: 14px;
+    line-height: 1.4;
+    transition: all 0.3s ease;
+}
+
+.chat-input:disabled {
+    background-color: #f5f5f5;
+    cursor: not-allowed;
 }
 
 .chat-input:focus {

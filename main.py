@@ -1,3 +1,11 @@
+from dotenv import load_dotenv
+import os
+
+# .env 파일 로드 및 API 키 확인
+load_dotenv()
+if not os.getenv("OPENAI_API_KEY"):
+    raise ValueError("OPENAI_API_KEY environment variable is required")
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -9,7 +17,6 @@ import json
 import uuid
 from datetime import datetime
 from typing import Dict, List, Optional
-import os
 
 from database import DatabaseService
 from llm_service import LLMService
@@ -17,9 +24,9 @@ from models import *
 
 # Initialize services
 db_service = DatabaseService()
-llm_service = LLMService()
+llm_service = LLMService(db_service=db_service)
 
-# Session storage (in production, use Redis or similar)
+# Session storage
 sessions: Dict[str, ChatSession] = {}
 
 @asynccontextmanager
@@ -42,8 +49,6 @@ async def lifespan(app: FastAPI):
         raise
     
     yield
-    
-    # Cleanup code would go here if needed
 
 app = FastAPI(title="Quality Analysis System", version="1.0.0", lifespan=lifespan)
 
@@ -53,12 +58,12 @@ templates = Jinja2Templates(directory="templates")
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
-    """Serve the main application page"""
+    """메인 페이지 제공"""
     return templates.TemplateResponse("index.html", {"request": request})
 
 @app.post("/api/start_session")
 async def start_session():
-    """Create a new chat session"""
+    """새로운 채팅 세션 생성"""
     session_id = str(uuid.uuid4())
     sessions[session_id] = ChatSession(
         session_id=session_id,
@@ -70,29 +75,28 @@ async def start_session():
 
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
-    """Handle chat messages"""
+    """채팅 메시지 처리"""
     try:
-        session_id = request.session_id
-        if session_id not in sessions:
+        if request.session_id not in sessions:
             raise HTTPException(status_code=404, detail="Session not found")
         
-        session = sessions[session_id]
+        session = sessions[request.session_id]
         user_message = request.message.strip()
         
         if not user_message:
             raise HTTPException(status_code=400, detail="Message cannot be empty")
         
-        # Add user message to history
+        # 사용자 메시지 기록
         session.chat_history.append({
             "role": "user",
             "content": user_message,
             "timestamp": datetime.now().isoformat()
         })
         
-        # Process the message
+        # 메시지 처리
         response = await process_chat_message(session, user_message)
         
-        # Add assistant response to history
+        # 시스템 응답 기록
         session.chat_history.append({
             "role": "assistant",
             "content": response.message,
@@ -107,162 +111,52 @@ async def chat(request: ChatRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 async def process_chat_message(session: ChatSession, message: str) -> ChatResponse:
-    """Process a chat message and return appropriate response"""
-    
-    # Step 1: Query classification
-    classification = await llm_service.classify_query(message, session.chat_history)
-    
-    if classification["queryType"] == "concept_lookup":
-        # Handle concept lookup (domain knowledge)
-        concept_response = llm_service.handle_concept_lookup(message)
-        return ChatResponse(
-            message=concept_response,
-            type="concept",
-            metadata={"queryType": "concept_lookup"}
-        )
-    
-    # Step 2: Check if confirmation is needed
-    if session.current_state != "confirmed":
-        confirmation_check = await llm_service.check_confirmation_needed(
-            message, session.chat_history
-        )
-        
-        if confirmation_check["needsConfirmation"]:
-            session.current_state = "awaiting_confirmation"
-            session.pending_intent = confirmation_check.get("candidateIntents", [])
-            
-            return ChatResponse(
-                message=confirmation_check["confirmationQuestion"],
-                type="confirmation",
-                metadata={
-                    "needsConfirmation": True,
-                    "candidateIntents": confirmation_check.get("candidateIntents", [])
-                }
-            )
-    
-    # Step 3: Generate SQL and execute analysis
-    session.current_state = "confirmed"
-    
+    """LLM 서비스를 통한 5단계 프로세스 처리"""
     try:
-        # Generate SQL queries
-        sql_generation = await llm_service.generate_sql(message, session.chat_history)
+        # LLM 서비스에 모든 처리 위임
+        result = await llm_service.process_query(message, session.chat_history)
         
-        # Execute SQL queries
-        results = []
-        for sql_query in sql_generation["sqlQueries"]:
-            try:
-                df = db_service.execute_query(sql_query["query"])
-                results.append({
-                    "description": sql_query["description"],
-                    "query": sql_query["query"],
-                    "data": df.to_dict('records'),
-                    "columns": df.columns.tolist()
-                })
-            except Exception as e:
-                print(f"SQL execution error: {e}")
-                results.append({
-                    "description": sql_query["description"],
-                    "query": sql_query["query"],
-                    "error": str(e)
-                })
+        # 상태 업데이트
+        if result["type"] == "confirmation":
+            session.current_state = "awaiting_confirmation"
+        elif result["type"] in ["analysis", "concept"]:
+            session.current_state = "confirmed"
         
-        # Generate visualization config and summary
-        if results and not any("error" in r for r in results):
-            viz_config = await llm_service.generate_visualization_config(
-                results, message, session.chat_history
-            )
-            
-            return ChatResponse(
-                message=viz_config["summary"],
-                type="analysis",
-                metadata={
-                    "sql_results": results,
-                    "visualization": viz_config,
-                    "confirmedIntent": sql_generation.get("confirmedIntent", "")
-                }
-            )
-        else:
-            # Handle SQL errors
-            error_messages = [r.get("error", "") for r in results if "error" in r]
-            error_response = f"죄송합니다. 데이터 조회 중 오류가 발생했습니다: {'; '.join(error_messages)}"
-            
-            return ChatResponse(
-                message=error_response,
-                type="error",
-                metadata={"errors": error_messages}
-            )
-            
-    except Exception as e:
-        print(f"Analysis error: {e}")
         return ChatResponse(
-            message="분석 처리 중 오류가 발생했습니다. 다시 시도해주세요.",
+            message=result["message"],
+            type=result["type"],
+            metadata=result["metadata"]
+        )
+        
+    except Exception as e:
+        print(f"Error in process_chat_message: {e}")
+        return ChatResponse(
+            message=f"처리 중 오류가 발생했습니다: {str(e)}",
             type="error",
             metadata={"error": str(e)}
         )
 
 @app.post("/api/select_metric")
 async def select_metric(request: MetricRequest):
-    """Handle metric selection from left panel"""
-    try:
-        session_id = request.session_id
-        if session_id not in sessions:
-            raise HTTPException(status_code=404, detail="Session not found")
-        
-        session = sessions[session_id]
-        
-        if request.metric == "품질부적합":
-            # Simulate clicking on quality non-conformance metric
-            message = "품질부적합 현황을 보여주세요"
-            response = await process_chat_message(session, message)
-            
-            # Add to chat history
-            session.chat_history.append({
-                "role": "user",
-                "content": message,
-                "timestamp": datetime.now().isoformat(),
-                "metadata": {"source": "metric_selection"}
-            })
-            
-            session.chat_history.append({
-                "role": "assistant",
-                "content": response.message,
-                "timestamp": datetime.now().isoformat(),
-                "metadata": response.metadata
-            })
-            
-            return response
-        else:
-            return ChatResponse(
-                message="해당 지표는 아직 지원되지 않습니다.",
-                type="info",
-                metadata={}
-            )
-            
-    except Exception as e:
-        print(f"Error in select_metric: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    """메트릭 선택 처리 - 단순히 패널 활성화 상태만 반환"""
+    if request.session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    return {
+        "status": "success",
+        "panels_active": True
+    }
 
 @app.post("/api/reset_session")
 async def reset_session(request: ResetRequest):
-    """Reset session state"""
-    try:
-        session_id = request.session_id
-        if session_id not in sessions:
-            raise HTTPException(status_code=404, detail="Session not found")
-        
-        # Reset session
-        sessions[session_id] = ChatSession(
-            session_id=session_id,
-            chat_history=[],
-            current_state="idle",
-            created_at=datetime.now()
-        )
-        
-        return {"status": "success", "message": "세션이 초기화되었습니다."}
-        
-    except Exception as e:
-        print(f"Error in reset_session: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    """세션 초기화"""
+    if request.session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    sessions[request.session_id].chat_history = []
+    sessions[request.session_id].current_state = "idle"
+    
+    return {"status": "success", "message": "Session reset successfully"}
 
 @app.get("/api/sessions")
 async def get_sessions():
