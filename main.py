@@ -239,9 +239,9 @@ async def get_yearly_quality_data(request: dict):
 
 @app.post("/api/monthly_quality_trend")
 async def get_monthly_quality_trend(request: dict):
-    """2025년 1월~3월 품질부적합률 추세 데이터 제공"""
+    """2025년 1월~5월 품질부적합률 추세 데이터 제공"""
     try:
-        # 2025년 1월~3월 월별 품질부적합률 데이터 조회
+        # 2025년 1월~5월 월별 품질부적합률 데이터 조회
         query = """
         SELECT 
             SUBSTR(DAY_CD, 1, 6) as year_month,
@@ -249,7 +249,7 @@ async def get_monthly_quality_trend(request: dict):
             SUM(TR_F_PRODQUANTITY) as total_production
         FROM TB_SUM_MQS_QMHT200 
         WHERE DAY_CD LIKE '2025%' 
-        AND SUBSTR(DAY_CD, 5, 2) IN ('01', '02', '03')
+        AND SUBSTR(DAY_CD, 5, 2) IN ('01', '02', '03', '04', '05')
         AND DAY_CD IS NOT NULL 
         GROUP BY SUBSTR(DAY_CD, 1, 6)
         ORDER BY year_month

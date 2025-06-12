@@ -261,7 +261,7 @@ class QualityAnalysisApp {
             <div class="chart-header">
                 <h3 class="chart-title">${metadata.visualization.title || '분석 결과'}</h3>
                 <div class="chart-actions">
-                    <button class="chart-btn" data-action="sql" data-sql='${JSON.stringify(metadata.sql_results)}'>SQL</button>
+                    <button class="chart-btn" data-action="sql" data-sql='${JSON.stringify(metadata.sql_results)}' disabled>SQL</button>
                     <button class="chart-btn" data-action="data" disabled>Data</button>
                     <button class="chart-btn" data-action="feedback" disabled>Feedback</button>
                     <button class="chart-btn" data-action="copy">Copy</button>
@@ -295,21 +295,28 @@ class QualityAnalysisApp {
         try {
             let plotlyData = [];
             let layout = {
-                title: viz.title || '분석 결과',
+                title: {
+                    text: viz.title || '분석 결과',
+                    font: { color: '#f8fafc', size: 22 },
+                    x: 0.5
+                },
                 paper_bgcolor: 'rgba(0,0,0,0)',
                 plot_bgcolor: 'rgba(0,0,0,0)',
-                font: { color: '#f8fafc' },
-                xaxis: { 
-                    title: viz.xAxis || 'X축',
+                font: { color: '#f8fafc', size: 18 },
+                xaxis: {
+                    title: { text: viz.xAxis || 'X축', font: { size: 18, color: '#f8fafc' } },
                     showgrid: false,
-                    color: '#f8fafc'
+                    color: '#f8fafc',
+                    tickfont: { size: 15, color: '#f8fafc' }
                 },
-                yaxis: { 
-                    title: viz.yAxis || 'Y축',
+                yaxis: {
+                    title: { text: viz.yAxis || 'Y축', font: { size: 18, color: '#f8fafc' } },
                     showgrid: false,
-                    color: '#f8fafc'
+                    color: '#f8fafc',
+                    tickfont: { size: 15, color: '#f8fafc' }
                 },
-                margin: { t: 50, r: 50, b: 50, l: 50 }
+                legend: { font: { size: 16, color: '#f8fafc' } },
+                margin: { t: 60, r: 50, b: 60, l: 60 }
             };
 
             // 데이터 컬럼 확인 및 매핑
@@ -506,40 +513,63 @@ class QualityAnalysisApp {
 
     handleChartAction(button) {
         const action = button.dataset.action;
-        
-        switch (action) {
-            case 'sql':
-                this.showSQLModal(JSON.parse(button.dataset.sql));
-                break;
-            case 'copy':
-                this.copyChart(button);
-                break;
-            case 'data':
-            case 'feedback':
-                this.showInfo('해당 기능은 준비 중입니다.');
-                break;
+        if (action === 'sql') {
+            let sqlData = [];
+            try {
+                sqlData = JSON.parse(button.dataset.sql);
+                if (!Array.isArray(sqlData)) sqlData = [];
+            } catch (e) {
+                sqlData = [];
+            }
+            this.showSQLModal(sqlData);
+        } else if (action === 'copy') {
+            this.copyChart(button);
+        } else if (action === 'data' || action === 'feedback') {
+            this.showInfo('해당 기능은 준비 중입니다.');
         }
     }
 
     showSQLModal(sqlResults) {
+        // 모달 중복 방지
+        if (document.querySelector('.sql-modal')) {
+            document.querySelector('.sql-modal').remove();
+        }
         const modal = document.createElement('div');
         modal.className = 'sql-modal';
+        // 쿼리 텍스트만 추출 (여러 개면 모두 합침)
+        let allSqlText = '';
+        if (Array.isArray(sqlResults) && sqlResults.length > 0) {
+            allSqlText = sqlResults.map(result => result.query).join('\n\n');
+        }
         modal.innerHTML = `
             <div class="sql-modal-content">
                 <div class="sql-modal-header">
                     <h3 class="sql-modal-title">생성된 SQL 쿼리</h3>
-                    <button class="close-btn">&times;</button>
+                    <div style="display: flex; gap: 1rem; align-items: center;">
+                        <button class="copy-sql-btn" style="padding: 0.5rem 1.2rem; font-size: 1rem; background: var(--accent-blue); color: white; border: none; border-radius: 0.375rem; cursor: pointer;">복사</button>
+                        <button class="close-btn">&times;</button>
+                    </div>
                 </div>
                 <div class="sql-content">
-                    ${sqlResults.map(result => `
-                        <h4>${result.description}</h4>
-                        <pre>${result.query}</pre>
-                        ${result.error ? `<p style="color: #ef4444;">오류: ${result.error}</p>` : ''}
-                    `).join('\n\n')}
+                    ${Array.isArray(sqlResults) && sqlResults.length > 0 ? sqlResults.map(result => `
+                        <h4>${result.description || ''}</h4>
+                        <pre>${result.query || ''}</pre>
+                        ${result.error ? `<p style=\"color: #ef4444;\">오류: ${result.error}</p>` : ''}
+                    `).join('\n\n') : '<p style="color: #ef4444;">SQL 쿼리 정보가 없습니다.</p>'}
                 </div>
             </div>
         `;
         document.body.appendChild(modal);
+        // 복사 버튼 이벤트
+        modal.querySelector('.copy-sql-btn').addEventListener('click', () => {
+            if (allSqlText) {
+                navigator.clipboard.writeText(allSqlText).then(() => {
+                    alert('SQL 쿼리가 복사되었습니다!');
+                });
+            } else {
+                alert('복사할 SQL 쿼리 정보가 없습니다.');
+            }
+        });
     }
 
     closeSQLModal() {

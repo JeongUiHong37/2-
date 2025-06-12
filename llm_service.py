@@ -85,8 +85,8 @@ DOMAIN_KNOWLEDGE = """
 
 
 [7] 예시 SQL
- - 2025년도에 발생한 고객사별 클레임률을 계산하는 SQL : SELECT TB_S95_SALS_CLAM030.END_USER_NAME, SUM(RMA_QTY) as 총클레임보상액, SUM(SALE_QTY) as 총매출가격, (SUM(RMA_QTY) * 1.0 / SUM(SALE_QTY)) * 100 as 클레임률 FROM TB_S95_SALS_CLAM030 JOIN TB_S95_A_GALA_SALESPROD ON TB_S95_SALS_CLAM030.END_USER_NAME = TB_S95_A_GALA_SALESPROD.END_USER_NAME WHERE SUBSTR(EXPECTED_RESOLUTION_DATE, 1, 4) = '2025' GROUP BY TB_S95_SALS_CLAM030.END_USER_NAME
- - 2025년도에 발생한 A고객사의 클레임율을 계산하는 SQL : SELECT TB_S95_SALS_CLAM030.END_USER_NAME, SUM(RMA_QTY) as 총클레임보상액, SUM(SALE_QTY) as 총매출가격, (SUM(RMA_QTY) * 1.0 / SUM(SALE_QTY)) * 100 as 클레임률 FROM TB_S95_SALS_CLAM030 JOIN TB_S95_A_GALA_SALESPROD ON TB_S95_SALS_CLAM030.END_USER_NAME = TB_S95_A_GALA_SALESPROD.END_USER_NAME WHERE TB_S95_SALS_CLAM030.END_USER_NAME = 'A고객사' AND SUBSTR(EXPECTED_RESOLUTION_DATE, 1, 4) = '2025' AND SUBSTR(SALES_DATE, 1, 4) = '2025' GROUP BY TB_S95_SALS_CLAM030.END_USER_NAME
+ - 2024년과 2025년의 후판 품종의 결함원인별 품질부적합률 비교 계산하는 SQL : SELECT SUBSTR(DAY_CD, 1, 4) as YEAR, EX_A_MAST_GD_CAU_NM as 결함원인, SUM(QLY_INC_HPW) as 총품질부적합량, SUM(TR_F_PRODQUANTITY) as 총생산량, (SUM(QLY_INC_HPW) * 1.0 / SUM(TR_F_PRODQUANTITY)) * 100 as 품질부적합률 FROM TB_SUM_MQS_QMHT200 WHERE ITEM_TYPE_GROUP_NAME = '후판' AND SUBSTR(DAY_CD, 1, 4) IN ('2024', '2025') GROUP BY YEAR, EX_A_MAST_GD_CAU_NM ORDER BY YEAR, 품질부적합률 DESC
+ - 2025년도에 발생한 A고객사의 클레임률을 계산하는 SQL : SELECT TB_S95_SALS_CLAM030.END_USER_NAME, SUM(RMA_QTY) as 총클레임보상액, SUM(SALE_QTY) as 총매출가격, (SUM(RMA_QTY) * 1.0 / SUM(SALE_QTY)) * 100 as 클레임률 FROM TB_S95_SALS_CLAM030 JOIN TB_S95_A_GALA_SALESPROD ON TB_S95_SALS_CLAM030.END_USER_NAME = TB_S95_A_GALA_SALESPROD.END_USER_NAME WHERE TB_S95_SALS_CLAM030.END_USER_NAME = 'A고객사' AND SUBSTR(EXPECTED_RESOLUTION_DATE, 1, 4) = '2025' AND SUBSTR(SALES_DATE, 1, 4) = '2025' GROUP BY TB_S95_SALS_CLAM030.END_USER_NAME
 
 ---
 
@@ -236,14 +236,15 @@ class LLMService:
         # 2단계: SQL 생성 및 실행
         sql_generation = await self._generate_sql(query, chat_history, confirmation if confirmation else {})
         if "type" in sql_generation and sql_generation["type"] == "error":
+            # LLM SQL 생성 자체가 실패한 경우에도 빈 sql_results라도 포함
             return {
                 "type": sql_generation.get("type", "error"),
                 "message": sql_generation.get("message", "오류가 발생했습니다."),
-                "metadata": sql_generation.get("metadata", {}),
+                "metadata": {"sql_results": []},
                 "raw_response": sql_generation.get("raw_response", None)
             }
         if "sqlQueries" not in sql_generation or not sql_generation["sqlQueries"]:
-            return {"type": "error", "message": "SQL 쿼리 생성 실패", "metadata": {}}
+            return {"type": "error", "message": "SQL 쿼리 생성 실패", "metadata": {"sql_results": []}}
 
         # 3단계: SQL 실행 및 결과 추출
         results = []
@@ -252,22 +253,25 @@ class LLMService:
                 df = self.db_service.execute_query(sql_query["query"])
                 df = df.astype(str)
                 if df.empty or (df.fillna(0).sum().sum() == 0):
-                    return {
-                        "message": "데이터 없음 또는 오류 가능성: 쿼리 결과가 비어있거나 모두 0입니다.",
-                        "type": "error",
-                        "metadata": {"sql_result": df.to_dict('records'), "query": sql_query["query"]}
-                    }
+                    results.append({
+                        "query": sql_query["query"],
+                        "data": [],
+                        "columns": [],
+                        "error": "데이터 없음 또는 모두 0"
+                    })
+                    continue
                 results.append({
                     "query": sql_query["query"],
                     "data": df.to_dict('records'),
                     "columns": df.columns.tolist()
                 })
             except Exception as e:
-                return {
-                    "message": f"SQL 실행 중 오류가 발생했습니다: {str(e)}",
-                    "type": "error",
-                    "metadata": {"error": str(e), "query": sql_query["query"]}
-                }
+                results.append({
+                    "query": sql_query["query"],
+                    "data": [],
+                    "columns": [],
+                    "error": str(e)
+                })
 
         # 4단계: 실행 결과를 LLM에 전달하여 시각화 정보만 추천받음
         visualization = await self._generate_visualization_config(results, query, chat_history)
@@ -275,12 +279,13 @@ class LLMService:
             return {
                 "message": "시각화 설정 생성 중 오류가 발생했습니다.",
                 "type": "error",
-                "metadata": visualization.get("metadata", {})
+                "metadata": {"sql_results": results, **visualization.get("metadata", {})}
             }
 
-        # 5~6단계: summary, insights 등 부가 설명 없이 시각화 정보만 반환
+        # 5단계: summary/insight 생성
+        summary, insight = await self._generate_summary_and_insight(results, query, chat_history)
         return {
-            "message": "분석이 완료되었습니다.",
+            "message": f"{summary}\n\n{insight}",
             "type": "analysis",
             "metadata": {
                 "sql_results": results,
@@ -567,3 +572,40 @@ SQL 실행 결과를 기반으로 실제 차트 생성에 필요한 시각화 �
             print(f"[DEBUG] 최종 시각화 설정: {result}")
         
         return result
+
+    async def _generate_summary_and_insight(self, sql_results, query, chat_history):
+        """
+        SQL 실행 결과와 분석 요청을 바탕으로 LLM에게 데이터 요약(수치) + 인사이트(제언)를 생성하도록 요청
+        """
+        import json
+        recent_context = get_recent_context(chat_history)
+        # 데이터 샘플 및 주요 컬럼 추출
+        if not sql_results or not sql_results[0].get('data'):
+            return ("분석 결과 데이터가 없습니다.", "추가 데이터가 필요합니다.")
+        data_sample = sql_results[0]['data'][:5]
+        available_columns = sql_results[0].get('columns', [])
+        # 프롬프트 구성
+        messages = [
+            {"role": "system", "content": f"""
+{self.domain_knowledge}
+{self.db_schema}
+
+대화 맥락:
+{recent_context}
+
+아래는 SQL 실행 결과 데이터 샘플입니다. 주요 수치 요약(숫자 포함)과, 1~2문장 인사이트를 생성하세요. 반드시 데이터 기반으로 작성하세요.
+
+데이터 샘플 (최대 5행):
+{json.dumps(data_sample, ensure_ascii=False, indent=2)}
+
+분석 요청: {query}
+"""},
+            {"role": "user", "content": f"SQL 실행 결과를 요약하고, 인사이트를 1~2문장으로 작성해줘."}
+        ]
+        response = await self._call_openai(messages, temperature=0.4, return_json=False)
+        # 응답에서 summary/insight 분리(간단하게 줄바꿈 기준)
+        if "\n" in response:
+            parts = response.split("\n", 1)
+            return parts[0].strip(), parts[1].strip()
+        else:
+            return response.strip(), ""
