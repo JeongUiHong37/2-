@@ -29,6 +29,14 @@ class QualityAnalysisApp {
             chatInput.style.height = chatInput.scrollHeight + 'px';
         });
 
+        // Enter로 메시지 전송, Shift+Enter는 줄바꿈
+        chatInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                this.sendMessage();
+            }
+        });
+
         // Reset button
         document.getElementById('reset-btn').addEventListener('click', () => {
             this.resetSession();
@@ -300,28 +308,34 @@ class QualityAnalysisApp {
                 margin: { t: 50, r: 50, b: 50, l: 50 }
             };
 
-            // Prepare data based on chart type
-            if (viz.chartType === 'bar') {
+            // 개선: seriesBy가 있을 때 xAxis별로 seriesBy별 시리즈를 그룹화
+            if ((viz.chartType === 'bar' || viz.chartType === 'line') && viz.seriesBy && viz.seriesBy !== 'null') {
+                // x축 값(예: 제품)과 seriesBy 값(예: YEAR) 추출
+                const xValues = [...new Set(data.map(d => d[viz.xAxis]))];
+                const seriesGroups = [...new Set(data.map(d => d[viz.seriesBy]))];
+                plotlyData = seriesGroups.map(group => {
+                    return {
+                        x: xValues,
+                        y: xValues.map(x => {
+                            const found = data.find(d => d[viz.xAxis] == x && d[viz.seriesBy] == group);
+                            return found ? found[viz.yAxis] : 0;
+                        }),
+                        name: group,
+                        type: viz.chartType === 'bar' ? 'bar' : 'scatter',
+                        mode: viz.chartType === 'line' ? 'lines+markers' : undefined,
+                        marker: { /* 색상 지정 가능 */ }
+                    };
+                });
+            } else if (viz.chartType === 'bar' || viz.chartType === 'line') {
+                // 기존 단일 시리즈
                 const xData = data.map(d => d[viz.xAxis]);
                 const yData = data.map(d => d[viz.yAxis]);
-                
                 plotlyData = [{
                     x: xData,
                     y: yData,
-                    type: 'bar',
+                    type: viz.chartType === 'bar' ? 'bar' : 'scatter',
+                    mode: viz.chartType === 'line' ? 'lines+markers' : undefined,
                     marker: { color: '#3b82f6' }
-                }];
-            } else if (viz.chartType === 'line') {
-                const xData = data.map(d => d[viz.xAxis]);
-                const yData = data.map(d => d[viz.yAxis]);
-                
-                plotlyData = [{
-                    x: xData,
-                    y: yData,
-                    type: 'scatter',
-                    mode: 'lines+markers',
-                    line: { color: '#3b82f6' },
-                    marker: { color: '#60a5fa' }
                 }];
             } else if (viz.chartType === 'pie') {
                 const labels = data.map(d => d[viz.xAxis]);
