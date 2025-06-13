@@ -323,13 +323,13 @@ class QualityAnalysisApp {
                 paper_bgcolor: 'rgba(0,0,0,0)',
                 plot_bgcolor: 'rgba(0,0,0,0)',
                 font: { color: '#f8fafc', size: 18 },
-                xaxis: {
+                xaxis: { 
                     title: { text: viz.xAxis || 'X축', font: { size: 18, color: '#f8fafc' } },
                     showgrid: false,
                     color: '#f8fafc',
                     tickfont: { size: 15, color: '#f8fafc' }
                 },
-                yaxis: {
+                yaxis: { 
                     title: { text: viz.yAxis || 'Y축', font: { size: 18, color: '#f8fafc' } },
                     showgrid: false,
                     color: '#f8fafc',
@@ -543,9 +543,9 @@ class QualityAnalysisApp {
             }
             this.showSQLModal(sqlData);
         } else if (action === 'copy') {
-            this.copyChart(button);
+                this.copyChart(button);
         } else if (action === 'data' || action === 'feedback') {
-            this.showInfo('해당 기능은 준비 중입니다.');
+                this.showInfo('해당 기능은 준비 중입니다.');
         }
     }
 
@@ -567,7 +567,7 @@ class QualityAnalysisApp {
                     <h3 class="sql-modal-title">생성된 SQL 쿼리</h3>
                     <div style="display: flex; gap: 1rem; align-items: center;">
                         <button class="copy-sql-btn" style="padding: 0.5rem 1.2rem; font-size: 1rem; background: var(--accent-blue); color: white; border: none; border-radius: 0.375rem; cursor: pointer;">복사</button>
-                        <button class="close-btn">&times;</button>
+                    <button class="close-btn">&times;</button>
                     </div>
                 </div>
                 <div class="sql-content">
